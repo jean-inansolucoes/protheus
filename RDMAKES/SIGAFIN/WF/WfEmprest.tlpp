@@ -1,0 +1,235 @@
+#INCLUDE 'PROTHEUS.CH'
+#Include 'FWMVCDef.ch'
+
+
+//====================================================================================================================\
+/*/{Protheus.doc}WfEmprest
+  ====================================================================================================================
+    @description
+    Eventos de envio de Workflow da Rotina de Empréstimos (LTBFIN01)
+
+    @author Djonata Guizzo <djonata.guizzo@totvs.com.br>
+    @version 1.0
+    @since 01/02/2021
+
+/*/
+//===================================================================================================================\
+Class WfEmprest FROM FWModelEvent
+    Public Method AfterTTS()
+    Public Method New()
+End Class
+//======================================================================================================================
+
+
+
+//============================================================================\
+/*/{Protheus.doc}WorkflowAgendamento:New
+  ==============================================================================
+    @description
+    Método Construtor da Classe
+
+    @author Djonata Guizzo <djonata.guizzo@totvs.com.br>
+    @version 1.0
+    @since 01/02/2021
+
+/*/
+//============================================================================\
+Method New() Class WfEmprest
+Return ()
+// FIM do Método WfEmprest:New
+//==============================================================================
+
+
+
+//============================================================================\
+/*/{Protheus.doc}WfEmprest:AfterTTS
+  ==============================================================================
+    @description
+    Método Construtor da Classe
+    -- AfterTTS
+    Método que é chamado pelo MVC quando ocorrer as ações do  após a transação.
+    Esse evento ocorre uma vez no contexto do modelo principal.
+
+    @author Djonata Guizzo <djonata.guizzo@totvs.com.br>
+    @version 1.0
+    @since 01/02/2021
+
+/*/
+//============================================================================\
+Method AfterTTS(oModel, cModelId, cAlias, lNewRecord) Class WfEmprest
+
+    Local oModelZAK := oModel:GetModel('MASTER')
+    Local oModelZAL := oModel:GetModel('ZALDETAIL')
+    Local lInclui	:= oModel:GetOperation() == MODEL_OPERATION_INSERT
+    Local lAltera	:= oModel:GetOperation() == MODEL_OPERATION_UPDATE
+    Local lExclui	:= oModel:GetOperation() == MODEL_OPERATION_DELETE
+    Local nOpc   	:= Iif(lInclui,3,iif(lAltera,8,iif(lExclui,9,0))) // 3 - INCLUSï¿½O ** 8 - ALTERAï¿½ï¿½O ** 9 - EXCLUSï¿½O
+    Local _cNum         := FWFldGet("ZAK_NUM")
+    Local _cNome        := FWFldGet("ZAK_NOME")
+    Local _cValor       := "R$ " + AllTrim(Transform(FWFldGet("ZAK_VALOR"),"@E 999,999,999.99"))
+    Local _cJuros       := AllTrim(Transform(FWFldGet("ZAK_JUROS"),"@E 999.99")) + "%"
+    Local _cParc        := cValToChar(oModelZAL:Length())
+    Local _cDtPgto      := dToC(FWFldGet("ZAK_DTPGTO"))
+    Local _aReneg       := {}
+    Local _cVerAnt      := ''
+    
+    If _lReneg
+        _cVerAnt := FwFldGet("ZAK_VERANT")
+        _aReneg := GetReneg(_cNum,_cVerAnt)
+    EndIf
+
+    U_WfEmprest(nOpc, _cNum, _cNome, _cValor, _cJuros, _cParc, _cDtPgto, _aReneg)
+
+Return ( Nil )
+
+User Function WfEmprest(nOpc, _cNum, _cNome, _cValor, _cJuros, _cParc, _cDtPgto, _aReneg)
+    Local cRet			:= ""
+    Local cMV_WFDIR		:= AllTrim(GetMV("MV_WFDIR"  ))		// Diretorio de trabalho do Workflow
+    Local oWFProc		:= nil
+    Local cCodProces	:= "WFEMP001"
+    Local cAssunto		:= ""
+    Local cEmailTo		:= ""
+    Local cArqHtml		:= ""
+    Local _cOper        := ''
+    Local _cParcRen     := ''
+    Local _cValRen      := ''
+    Local _cJurRen      := ''
+    Local _cParRen      := ''
+
+    If nOpc == 3 .and. _lReneg
+        cAssunto    := "[TRELAC] RENEGOCIAÇÃO DE EMPRÉSTIMOS"
+        cArqHtml		:= cMV_WFDIR +"\wfemprest005.htm"
+
+        cEmailTo := AllTrim(GetMv("MX_EMPAPR"))
+    
+        If Len(_aReneg) > 0
+            _cValRen    := _aReneg[1,1]
+            _cJurRen    := _aReneg[1,2]
+            _cParcRen   := _aReneg[1,3]
+            _cParRen    := _aReneg[1,4]
+        EndIf
+    ElseIf nOpc == 3 
+        cEmailTo := AllTrim(GetMv("MX_EMPAPR"))
+        cAssunto    := "[TRELAC] APROVAÇÃO DE EMPRÉSTIMOS"
+        _cOper       := "inclu&iacute;do"
+        cArqHtml		:= cMV_WFDIR +"\wfemprest001.htm"
+    ElseIf nOpc == 8
+        cEmailTo := AllTrim(GetMv("MX_EMPAPR"))
+        cAssunto := "[TRELAC] EMPRÉSTIMO ALTERADO"
+        _cOper       := "alterado"
+        cArqHtml		:= cMV_WFDIR +"\wfemprest001.htm"
+    ElseIf nOpc == 9
+        cEmailTo := AllTrim(GetMv("MX_EMPAPR"))
+        cAssunto := "[TRELAC] EXCLUSÃO DE EMPRÉSTIMOS"
+        cArqHtml		:= cMV_WFDIR +"\wfemprest002.htm"
+    ElseIf nOpc == 10
+        cEmailTo := AllTrim(GetMv("MX_EMPFIN"))
+        cAssunto := "[TRELAC] EMPRÉSTIMO APROVADO"
+        cArqHtml		:= cMV_WFDIR +"\wfemprest003.htm"
+    ElseIf nOpc == 11
+        cEmailTo := AllTrim(GetMv("MX_EMPFIN"))
+        cAssunto := "[TRELAC] EMPRÉSTIMO RECUSADO"
+        cArqHtml		:= cMV_WFDIR +"\wfemprest004.htm"
+    EndIf
+
+    ConOut(cCodProces +"|INICIO")
+
+    If !File(cArqHtml)
+        Alert(cCodProces +"|Arquivo HTML não encontrado! "+ cArqHtml)
+        ConOut(cCodProces +"|Arquivo HTML não encontrado! "+ cArqHtml)
+        Return(cRet)
+    Endif
+
+    //ÚÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+    //³ Obtém e-mails dos destinatários, na cotação ou no SA2                     ³
+    //ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+
+    
+    If Empty(cEmailTo)
+        Return(cRet)
+    Endif
+
+
+    //ÚÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+    //³ Gera Workflow da COTACAO DE COMPRA (função W002B02)                       ³
+    //³ Retorna o ID do arquivo HTML para uso no WF LINK DO E-MAIL                ³
+    //ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+    oWFProc := TWFProcess():New(cCodProces, cAssunto)
+    
+    //oWFProc := TWFProcess():New(cCodProces, cAssunto)
+    oWFProc:NewTask(cAssunto, cArqHtml)
+    oWFProc:cTo      := cEmailTo
+    oWFProc:cSubject := cAssunto
+    
+    ConOut(cCodProces +"|ProcessID: "+ oWFProc:fProcessID +"|TaskID: "+ oWFProc:fTaskID )
+    If GeraHtml(@oWFProc, _cNum, _cNome, _cValor, _cJuros, _cParc, _cDtPgto, _cOper, _cValRen, _cJurRen, _cParcRen, _cParRen)
+        cRet := oWFProc:Start()
+        ConOut(cCodProces +"|cRet: "+ cRet)
+       
+    Endif
+
+    ConOut(cCodProces +"|FIM")
+
+Return
+
+
+Static Function GeraHtml(oWFProc, _cNum, _cNome, _cValor, _cJuros, _cParc, _cDtPgto, _cOper, _cValRen, _cJurRen, _cParcRen, _cParRen)
+    Local lRet		:= .T.
+    
+    // Preenche as variaveis do Cabeçalho
+    oWFProc:oHtml:ValByName("NUM_EMPREST"       , _cNum ) //
+    oWFProc:oHtml:ValByName("NOME_PRODUTOR"     , _cNome)
+    oWFProc:oHtml:ValByName("VALOR"             , _cValor)
+    oWFProc:oHtml:ValByName("JUROS"             , _cJuros)
+    oWFProc:oHtml:ValByName("PARCELAS"          , _cParc)
+    oWFProc:oHtml:ValByName("DATA_PAGTO"        , _cDtPgto)
+    oWFProc:oHtml:ValByName("OPERACAO"          , _cOper)
+
+    If !Empty(_cValRen)
+        oWFProc:oHtml:ValByName("VALOR_RENEG"               , _cValRen)
+        oWFProc:oHtml:ValByName("JUROS_RENEG"               , _cJurRen)
+        oWFProc:oHtml:ValByName("PARCELAS_RENEG"            , _cParcRen)
+        oWFProc:oHtml:ValByName("PARC_RENEG"                , _cParRen)
+    EndIf
+Return(lRet)
+
+
+// Busca dados do contrato renegociado
+Static Function GetReneg(_cNum,_cVerAnt)
+    Local _aAreaZAK     := ZAK->(GetArea())
+    Local _aAreaZAL     := ZAL->(GetArea())
+    Local _cValor       := ""
+    Local _cJuros       := ""
+    Local _cParc        := ""
+    Local _cParRen      := ""
+    Local _nCount       := 0
+    Local _ARENEG       := {}
+
+    dbSelectArea('ZAK')
+    ZAK->(dbSetOrder(1)) 
+    ZAK->(dbGoTop())
+    If ZAK->(dbSeek(xFilial('ZAK')+_cNum+_cVerAnt))
+        dbSelectArea('ZAL')
+        ZAL->(dbSetOrder(1)) 
+        ZAL->(dbGoTop())
+        If ZAL->(dbSeek(xFilial('ZAL')+_cNum+_cVerAnt))
+            While !ZAL->(EOF()) .AND. ZAL->(ZAL_FILIAL+ZAL_NUM+ZAL_VERSAO) == xFilial('ZAL')+_cNum+_cVerAnt
+                _nCount++
+                ZAL->(dbSkip())
+            EndDo
+        EndIf
+
+        _cValor         := "R$ " + AllTrim(Transform(ZAK->ZAK_VALOR,"@E 999,999,999.99"))
+        _cJuros         := AllTrim(Transform(ZAK->ZAK_JUROS,"@E 999.99")) + "%"
+        _cParc          := cValToChar(_nCount)
+        _cParRen        := AllTrim(ZAK->ZAK_PARREN)
+    EndIf
+
+    If !Empty(_cValor)
+        aAdd(_aReneg,{_cValor,_cJuros,_cParc,_cParRen})
+    EndIf
+
+    RestArea(_aAreaZAK)
+    RestArea(_aAreaZAL)
+
+Return _aReneg
